@@ -21,12 +21,12 @@ The Guition JC8012P4A1 is a 10.1" LCD display module with a display resolution o
 # General
 
 | Property | Value |
-|----------|------|
+|----------|-------|
 | Product | JC8012P4A1C-I-W-Y |
 | Manufacturer | Jingcai / GUITION / DIYmalls |
 | Module Type | ESP32-P4 HMI Display |
-| MCU | ESP32-P4 |
-| Wireless MCU | ESP32-C6 |
+| Host MCU | ESP32-P4 |
+| Hosted MCU (WiFi) | ESP32-C6 |
 | Operating Voltage | 5 V |
 | Typical Current | ≈700 mA |
 | Weight | ≈550 g |
@@ -36,7 +36,7 @@ The Guition JC8012P4A1 is a 10.1" LCD display module with a display resolution o
 # Display
 
 | Property | Value |
-|----------|------|
+|----------|-------|
 | Size | 10.1 inch |
 | Technology | TFT LCD |
 | Panel Type | IPS |
@@ -50,12 +50,46 @@ The Guition JC8012P4A1 is a 10.1" LCD display module with a display resolution o
 | Driver IC | JD9365 |
 | Backlight | LED |
 
+## JC8012P4A1 Driver Configuration (JD9365)
+
+| Property | Value |
+|----------|------:|
+| Width | 800 |
+| Height | 1280 |
+| Hsync back porch | 20 |
+| Hsync pulse width | 20 |
+| Hsync front porch | 40 |
+| Vsync back porch | 8 |
+| Vsync pulse width | 4 |
+| Vsync front porch | 20 |
+| Pclk frequency | 60 MHz |
+| Lane bit rate | 1 Gbps |
+| Color order | RGB |
+| Reset pin | 27 |
+
+## JC8012P4A1 V2 Driver Configuration (JD9365)
+
+| Property | Value |
+|----------|------:|
+| Width | 800 |
+| Height | 1280 |
+| Hsync back porch | 20 |
+| Hsync pulse width | 20 |
+| Hsync front porch | 40 |
+| Vsync back porch | 10 |
+| Vsync pulse width | 4 |
+| Vsync front porch | 20 |
+| Pclk frequency | 60 MHz |
+| Lane bit rate | 1 Gbps |
+| Color order | RGB |
+| Reset pin | 27 |
+
 ---
 
 # LCD Controller
 
 | Property | Value |
-|----------|------|
+|----------|-------|
 | Controller | JD9365 |
 | Interface | RGB Parallel |
 | Color Format | RGB888 |
@@ -68,9 +102,9 @@ The Guition JC8012P4A1 is a 10.1" LCD display module with a display resolution o
 # Touch Panel
 
 | Property | Value |
-|----------|------|
+|----------|-------|
 | Type | Capacitive Multi-Touch |
-| Controller | CST226 (board dependent) |
+| Controller | gsl3680 |
 | Interface | I²C |
 | Touch Points | Multi-touch |
 
@@ -79,7 +113,7 @@ The Guition JC8012P4A1 is a 10.1" LCD display module with a display resolution o
 # ESP32-P4
 
 | Property | Value |
-|----------|------|
+|----------|-------|
 | CPU | Dual-core RISC-V |
 | Frequency | up to 400 MHz |
 | PSRAM | 32 MB |
@@ -241,3 +275,10 @@ ESPHome includes a dedicated initialization sequence for the V2 hardware.
 - Display response time
 - Touch controller revision
 - Display power sequencing
+
+---
+# Supported Features
+
+- [x] Display Panel
+- [ ] Touchscreen
+- [ ] Camera
