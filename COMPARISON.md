@@ -505,3 +505,273 @@ The TX/RX claim is only partially reflected:
 - Therefore the GSL3670/GSL3680 names do not, by themselves, establish different sensor-matrix sizes.
 - The major actual device differences in this repository are panel-specific calibration, GPIO wiring, display geometry, and LCD initialization.
 - The Guition demo’s LCD initialization is separate from its touch initialization and is likely different from the Seeed ReTerminal’s display sequence, but the actual JD9365 component source is missing here, so that portion cannot be compared byte-for-byte.
+
+> I've put another implementation of a gsl3680 driver for esphome into the esphome folder, next to the gsl370 driver. The thing I would like to figure out: would the gsl3670 driver also work for the gsl3680 and if so, how would it have to be configured. If not, what would have to be changed.
+
+I’ll compare the newly added ESPHome GSL3680 implementation against the existing GSL3670 driver at the device-facing level, then trace what ESPHome configuration controls address, GPIOs, axes, matrix dimensions, and firmware. The key test is whether the GSL3670 code is protocol-compatible with the GSL3680 hardware or merely happens to share the same firmware/report format.
+
+...
+<!--
+Searched for files matching `home-panel-builder` · `esphome/**`, 13 matches
+
+Searched for regex `gsl3680|GSL3680|gsl3670|GSL3670|firmware|0x40|0x80|drv_num|sen_num|reset|interrupt` (`**/esphome/**`), 922 results
+
+Read [](file:///home/michael/projects/home-panel-builder/esphome)
+-->
+
+The new GSL3680 ESPHome component is structurally much closer to the ESP-IDF driver: it bundles the firmware as `offset + 32-bit value` records and includes the point-ID algorithm. I’m reading its setup/report path and configuration schema now; that will tell us whether it is a true alternative implementation or whether the existing GSL3670 driver could be made equivalent with only YAML changes.
+
+...
+<!--
+Searched for regex `gsl_DataInit|gsl_config_data_id|screen_x_max|screen_y_max|drv_num =|sen_num =|0x000e001a|0x03200500|0x200` (`**/esphome/gsl3680/**`), 63 results
+
+Read [](file:///home/michael/projects/home-panel-builder/esphome/gsl3680/gsl3680.cpp)
+
+Read [](file:///home/michael/projects/home-panel-builder/esphome/gsl3680/gsl3680.h)
+
+Read [](file:///home/michael/projects/home-panel-builder/esphome/gsl3680/touchscreen.py)
+
+Read [](file:///home/michael/projects/home-panel-builder/esphome/gsl3680/README.md)
+-->
+
+Yes, the existing ESPHome `gsl3670` driver would probably communicate with the Guition GSL3680 successfully, but only under specific conditions. The two drivers are compatible at the low-level controller protocol, not equivalent in behavior.
+
+The important evidence is:
+
+- Both use I2C address `0x40`.
+- Both read touch data from register `0x80`.
+- Both use the same GSL firmware.
+- Both decode the same four-byte contact format.
+- The new ESPHome GSL3680 component uses the same firmware table and the same `gsl_point_id` algorithm as the ESP-IDF GSL3680 driver.
+- The existing GSL3670 driver already implements the same basic firmware boot sequence and raw touch decoding.
+
+So the GSL3670 driver is not inherently limited to a GSL3670 silicon device. In this repository, the name mostly identifies the ESPHome component and its default firmware/configuration profile.
+
+**What would need to be configured**
+
+For the Guition JC8012P4A1, the existing GSL3670 component would need a model profile equivalent to the following:
+
+```yaml
+touchscreen:
+  - platform: gsl3670
+    model: CUSTOM
+    i2c_id: bus_a
+    reset_pin:
+      number: GPIO22
+    interrupt_pin:
+      number: GPIO21
+    swap_x_y: false
+    mirror_x: false
+    mirror_y: true
+    x_min: 0
+    y_min: 0
+    x_max: 800
+    y_max: 1280
+```
+
+The exact surrounding ESPHome syntax depends on the project’s display and I2C configuration, but these are the relevant device values from the Guition BSP:
+
+```c
+.x_max = 800,
+.y_max = 1280,
+.rst_gpio_num = GPIO_NUM_22,
+.int_gpio_num = GPIO_NUM_21,
+.swap_xy = 0,
+.mirror_x = 0,
+.mirror_y = 1,
+```
+
+They are defined in esp32_p4_function_ev_board.c, while the physical I2C pins are:
+
+```text
+SDA = GPIO7
+SCL = GPIO8
+I2C address = 0x40
+```
+
+from esp32_p4_function_ev_board.h and esp_lcd_touch_gsl3680.h.
+
+The existing GSL3670 component can already select `CUSTOM`, which avoids the Seeed-specific defaults:
+
+```python
+" CUSTOM": {}
+```
+
+More precisely, the current key is `"CUSTOM"` in touchscreen.py. With `CUSTOM`, the reset pin, interrupt pin, axis transforms, coordinate limits, and firmware must be supplied explicitly.
+
+The firmware must be the byte-for-byte-equivalent blob you generated from the ESP-IDF table. It should be supplied as:
+
+```yaml
+firmware:
+  file: /path/to/guition-gsl3680-firmware.bin
+```
+
+The existing GSL3670 component validates that the file uses 132-byte blocks:
+
+```text
+4-byte page/address header
+128-byte data block
+```
+
+That validation is in touchscreen.py.
+
+**What the existing GSL3670 driver does not use**
+
+The major functional difference is the missing host-side point-processing algorithm.
+
+The new GSL3680 component does this after reading raw contacts:
+
+```cpp
+gsl_alg_id_main(&cinfo);
+unsigned int mask = gsl_mask_tiaoping();
+```
+
+See gsl3680.cpp.
+
+The algorithm is implemented in gsl_point_id.cpp, and it is configured by the `gsl_config_data_id` table in gsl3680_firmware.h.
+
+The existing GSL3670 driver does not run that algorithm. It simply:
+
+1. Reads 44 bytes from `0x80`.
+2. Decodes up to three contacts.
+3. Rejects coordinates above `8192`.
+4. Passes raw points to ESPHome.
+
+See gsl3670_touchscreen.cpp.
+
+That means the GSL3670 driver may work for basic single-touch operation, but it will not behave identically to the GSL3680 implementation for:
+
+- Multi-touch tracking
+- Contact-ID stability
+- Filtering
+- Prediction
+- Edge correction
+- Point interpolation
+- Noise suppression
+- Dynamic mask correction
+
+The `26 TX / 14 RX` values are consumed by this algorithm, not by the raw I2C protocol. In the new component’s point-ID configuration, the values are decoded from the packed configuration table and used throughout gsl_point_id.cpp. The existing GSL3670 component has no equivalent configuration path.
+
+**Initialization sequence differences**
+
+The existing GSL3670 driver performs:
+
+```text
+clear registers
+reset
+load firmware
+start chip
+reset again
+start chip again
+```
+
+See gsl3670_touchscreen.cpp.
+
+The new GSL3680 component performs:
+
+```text
+read configuration
+clear registers
+reset
+load firmware
+start chip
+read RAM marker
+initialize host-side point algorithm
+```
+
+See gsl3680.cpp.
+
+The new driver also checks:
+
+```text
+register 0xf0
+RAM register 0xb0
+```
+
+and expects `0x5a` marker bytes from RAM. The existing GSL3670 driver has no equivalent readback validation.
+
+The existing GSL3670 initialization is therefore less diagnostic, but its extra reset/start cycle is not necessarily wrong. It mirrors the original Seeed-style initialization sequence. Since you confirmed that the firmware is identical, the controller should accept the sequence, but the GSL3680 version is preferable for the Guition board because it was built around this exact driver/configuration path and verifies the result.
+
+**Touch-count behavior**
+
+The existing GSL3670 driver supports up to three points:
+
+```cpp
+static const size_t MAX_TOUCHES = 3;
+```
+
+and reads all 44 bytes.
+
+The new GSL3680 ESPHome implementation deliberately reads only 24 bytes and clamps to two contacts:
+
+```cpp
+if (touch_count > 2) {
+  touch_count = 2;
+}
+```
+
+See gsl3680.cpp.
+
+That appears to be an implementation choice for the intended screensaver/wake use case, not a GSL3680 hardware limit. The ESP-IDF version reads 44 bytes and defines three coordinate slots, although it has its own bounds issue if the controller reports more than three.
+
+Therefore, using the GSL3670 raw reader could actually expose more contacts than the new ESPHome GSL3680 component, but without the GSL point-ID algorithm those contacts may be less stable.
+
+**Recommended choice**
+
+For the Guition panel, use the new `gsl3680` component when possible. It has the correct:
+
+- Firmware representation
+- Guition-oriented boot/readback sequence
+- Point-ID algorithm
+- `gsl_config_data_id`
+- GSL3680-specific implementation structure
+
+Use the existing `gsl3670` component only if you specifically want a simpler raw-touch driver. To make that work reliably on the Guition panel:
+
+1. Use the converted firmware file that you verified identical to the ESP-IDF firmware.
+2. Select `model: CUSTOM`.
+3. Set reset to GPIO22.
+4. Set interrupt to GPIO21.
+5. Use I2C address `0x40`.
+6. Configure the Guition axis orientation: no swap, no X mirror, Y mirror.
+7. Set coordinate limits appropriate for the 800x1280 panel.
+8. Expect raw, unfiltered touch data rather than the GSL3680 point-ID behavior.
+9. Prefer the longer reset/write delays used by the GSL3680 component if startup reliability is inconsistent.
+
+**If the GSL3670 driver needs to be made equivalent**
+
+The smallest useful code change would be to add the GSL3680 point-ID algorithm to the existing GSL3670 driver:
+
+```cpp
+#include "gsl_point_id.h"
+#include "gsl3680_firmware.h"
+```
+
+Then, after decoding the raw contacts:
+
+```cpp
+gsl_alg_id_main(&cinfo);
+unsigned int mask = gsl_mask_tiaoping();
+```
+
+and copy the mask writeback behavior from gsl3680.cpp.
+
+It would also need to call:
+
+```cpp
+gsl_DataInit(gsl_config_data_id);
+```
+
+during setup, as the GSL3680 implementation does in gsl3680.cpp.
+
+At that point, however, the GSL3670 and GSL3680 components would be converging into one driver. The cleaner design would be to retain one generic GSL driver with model-specific profiles for:
+
+- Firmware
+- Reset/interrupt pins
+- Raw coordinate orientation
+- Screen dimensions
+- Point-ID configuration
+- Maximum reported contacts
+- Boot verification and timing
+
+So the practical answer is: **yes, the GSL3670 driver should be able to operate the GSL3680/Guition hardware with the correct firmware and GPIO/axis configuration, but it will not provide the same touch quality or behavior until the GSL3680 point-ID algorithm and configuration table are added.**
