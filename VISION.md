@@ -54,13 +54,53 @@ The first target for the Home Panel Builder will be the Guition JC8012P4A1. This
 
 ### Firmware
 
-The firmware is created by providing an appropriate YAML file to ESPHome and have it compiled by ESPHome and uploaded to the device.
+The firmware is created by providing an appropriate device configuration YAML file to ESPHome. ESPHome can then compile it and upload the firmware to the device.
+
+By creating a device configuration file for ESPHome, the Home Panel Builder can make use of all the supported devices from ESPHome. The main cornerstones being the `display`, `touchscreen`, `lvgl` to render the panels content and `scripts` to define local or remote activities, that can be triggered through the Home Panel.
 
 ### Home Panel Builder
 
 The Home Panel Builder itself is a web application.
 
-Home Panel Builder is written in C# running in a dotnet Docker image that can be executed as a container in Home Assistant as a Home Assistant App.
+Home Panel Builder is written in C# built into a dotnet Docker image and run as a Docker container. The intention is, that the container can be executed in Home Assistant as a Home Assistant App.
 
 ## Design
 
+### Storage
+
+The Home Panel Builder uses the configuration folder of ESPHome (short: config folder) to share YAML files and to store assets and settings. For example:
+
+* In a ESPHome Builder instance in Home Assistant that is the folder `/homeasssistant/esphome` on the host.
+* In an ESPHome Device Builder desktop instance on Windows that is the folder `%USERPROFILE%\esphome`.
+* In a clone of the `https://github.com/esphome/esphome` repository that is the `config` folder that you would typically create in your local copy to store your configuration files.
+
+Home Panel Builder will store panel designs and its own settings in a subfolder called `.home-panel`.
+
+Design files are called `{panel-name}.design.yaml`. Home Panel Builder will generate a `{panel-name}.yaml` file for the ESPHome Device Builder in the config folder.
+
+### Home Panel UI
+
+The UI of a Home Panel is based on `lvgl.pages`. There is at least one page, which is the Home Page. Other pages can be added and can be navigated to either by user interaction or when certain events occur, like the Home Panel becoming idle after a certain period of time, displaying a different page during certain hours, or turning the screen off, when everyone leaves the house.
+
+Every page has the same basic layout. It consists of a narrow bar at the top, which is used to display a title or certain status information, called the title bar. The area below the title bar is the grid. The grid consists of rows and columns, where each intersection of a row with a column is a cell. The grid holds tiles, where each tile is rectangular with its width and height being multipes of the width and height of a cell. The size of the tile can therefore be specified in the number of columns and rows that it covers. E.g. a tile that has the width of three cells and the height of two cells may be referred to as a 3x2. Tiles must not overlap.
+
+The number of rows and columns in the grid should be chosen so that a 1x1 tile roughly has the size of a key on a keyboard.
+
+> [!NOTE]
+> The screen of the Guition JC8012P4A1 is 1280 pixels wide and 800 pixels high in landscape orientation (default is portrait). The active display area is 216.58 mm x 135.36 mm. For a cell size of approximately 18 mm by 18 mm and a title bar height of 9 mm, that is 12 cells across times 7 cells down.
+
+Tiles of size 1x1 (small tiles) should only be used to represent keys, e.g. on a security keypad or to display simple status information that can for example be displayed with an icon and optional color.
+
+Regular tiles start at a size of 2x2. They can display an icon in the top left corner, a large state value in the top right and a small tile title at the bottom.
+
+Large tiles start at a size of 4x4. In addition to the typical content of a regular tile, they can also display more elaborate content, like a weather forecast.
+
+Each tile can have up to two associated actions. One is executed, when the tile is pressed for a short period of time. The other is executed, when the tile is pressed for a longer period of time.
+
+Typical actions that can be associated with a tile press or long press:
+
+* Navigate to a specific page
+* Navigate to the previous page
+* Navigate to the home page
+* Perform a Home Assistant action (e.g. to turn on a light)
+* Execute a pre-defined or custom script
